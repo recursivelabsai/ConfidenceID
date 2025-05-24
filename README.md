@@ -1,5 +1,3 @@
-# ConfidenceID
-
 # ConfidenceID Trust Ecosystem
 
 <div align="center">
