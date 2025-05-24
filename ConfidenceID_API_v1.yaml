@@ -1,0 +1,299 @@
+openapi: 3.1.0
+info:
+  title: ConfidenceID Trust Ecosystem API
+  description: |
+    API for the ConfidenceID Trust Ecosystem, providing holistic, multimodal verification
+    and confidence scoring of AI-generated content. The API incorporates temporal trust dynamics,
+    collective memory, decentralized consensus, information-theoretic compression, and
+    contextually adaptive interfaces.
+  version: 1.0.0
+  contact:
+    name: ConfidenceID Team
+    url: https://github.com/YourOrg/ConfidenceID
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: https://api.confidenceid.org/v1
+    description: Production API Server
+  - url: https://api.staging.confidenceid.org/v1
+    description: Staging API Server
+tags:
+  - name: Scoring
+    description: Endpoints for holistic confidence scoring of content
+  - name: TemporalTrustField
+    description: Endpoints for accessing and analyzing temporal trust fields
+  - name: CollectiveMemory
+    description: Endpoints for querying the verification fossil record
+  - name: DecentralizedProtocol
+    description: Endpoints for interacting with the decentralized trust network
+  - name: InformationCompression
+    description: Endpoints for compressed trust signals
+  - name: EmbodiedInterface
+    description: Endpoints for adaptive trust interface recommendations
+  - name: ResidueManagement
+    description: Endpoints for working with symbolic residue
+  - name: Evolution
+    description: Endpoints for participating in ConfidenceID's evolution
+
+paths:
+  /score:
+    post:
+      summary: Score multimodal content
+      description: |
+        Submit multimodal content for comprehensive confidence scoring.
+        Returns a holistic ConfidenceID score along with detailed component scores
+        and trust field information.
+      operationId: scoreContent
+      tags:
+        - Scoring
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoringRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MultipartScoringRequest'
+      responses:
+        '200':
+          description: Content successfully scored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Content too large
+        '429':
+          description: Rate limit exceeded
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - ApiKeyAuth: []
+  
+  /score/{scoreId}:
+    get:
+      summary: Retrieve an existing score by ID
+      description: |
+        Retrieve a previously generated confidence score by its unique identifier.
+      operationId: getScoreById
+      tags:
+        - Scoring
+      parameters:
+        - name: scoreId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Unique identifier for the score
+      responses:
+        '200':
+          description: Score retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoringResponse'
+        '404':
+          description: Score not found
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /temporal-trust-field:
+    post:
+      summary: Get temporal trust field for content
+      description: |
+        Analyze the temporal trust dynamics for content.
+        Returns a detailed trust field representation showing how trust evolves over time.
+      operationId: getTemporalTrustField
+      tags:
+        - TemporalTrustField
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemporalFieldRequest'
+      responses:
+        '200':
+          description: Temporal trust field retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemporalFieldResponse'
+        '400':
+          description: Invalid request parameters
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /temporal-trust-field/{fieldId}/stability:
+    get:
+      summary: Get stability metrics for a trust field
+      description: |
+        Retrieve stability metrics for a previously generated trust field.
+      operationId: getTrustFieldStability
+      tags:
+        - TemporalTrustField
+      parameters:
+        - name: fieldId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Unique identifier for the trust field
+        - name: timeWindow
+          in: query
+          required: false
+          schema:
+            type: string
+            default: '1d'
+          description: Time window for stability analysis (e.g., '1h', '1d', '7d')
+      responses:
+        '200':
+          description: Stability metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StabilityResponse'
+        '404':
+          description: Trust field not found
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /collective-memory/excavate:
+    post:
+      summary: Excavate patterns from the fossil record
+      description: |
+        Query the collective trust memory to identify patterns, anomalies,
+        and insights from verification history.
+      operationId: excavatePatterns
+      tags:
+        - CollectiveMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArchaeologyRequest'
+      responses:
+        '200':
+          description: Archaeological patterns retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArchaeologyResponse'
+        '400':
+          description: Invalid request parameters
+        '403':
+          description: Insufficient permissions to access requested fossil records
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /collective-memory/fossils:
+    post:
+      summary: Store verification fossil
+      description: |
+        Add a verification event to the collective memory as a fossil record.
+      operationId: storeVerificationFossil
+      tags:
+        - CollectiveMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerificationFossil'
+      responses:
+        '201':
+          description: Fossil stored successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FossilResponse'
+        '400':
+          description: Invalid fossil data
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /decentralized-protocol/nodes:
+    post:
+      summary: Register a verification node
+      description: |
+        Register a new node in the decentralized trust network.
+      operationId: registerNode
+      tags:
+        - DecentralizedProtocol
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeRegistration'
+      responses:
+        '201':
+          description: Node registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeResponse'
+        '400':
+          description: Invalid node data
+        '409':
+          description: Node ID already exists
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /decentralized-protocol/nodes/{nodeId}:
+    get:
+      summary: Get node information
+      description: |
+        Retrieve information about a specific verification node.
+      operationId: getNodeInfo
+      tags:
+        - DecentralizedProtocol
+      parameters:
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique identifier for the node
+      responses:
+        '200':
+          description: Node information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeInfo'
+        '404':
+          description: Node not found
+        '500':
+          description: Internal server error
+      security:
+        - ApiKeyAuth: []
+
+  /decentralized-protocol/challenges:
