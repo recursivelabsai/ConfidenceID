@@ -15,7 +15,7 @@
 
 </div>
 
-## 🜏 Vision & Mission
+## Vision & Mission
 
 Inspired by DeepMind's verification breakthroughs, ConfidenceID evolves AI verification watermarking system into a dynamic **trust ecosystem** - where verification signals evolve over time, learn from collective memory, distribute authority through consensus, compress information efficiently, and adapt naturally to different contexts and user needs.
 
