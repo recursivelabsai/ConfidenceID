@@ -1177,4 +1177,727 @@ class TemporalPatternAnalyzer:
             
             previous_active = active_set
         
-        #
+        # Analyze verifier effectiveness evolution
+        verifier_effectiveness = {}
+        effectiveness_evolution = {}
+        
+        for verifier in verifiers:
+            # Group by time bin and calculate mean score for this verifier
+            verifier_df = df[df['verifier_id'] == verifier]
+            
+            if len(verifier_df) >= 10:  # Need at least 10 data points
+                verifier_scores = verifier_df.groupby('time_bin')['verification_score'].mean()
+                
+                if len(verifier_scores) >= 5:  # Need at least 5 time periods
+                    # Perform linear regression on scores
+                    x = np.array(range(len(verifier_scores)))
+                    y = verifier_scores.values
+                    
+                    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+                    
+                    # Check if the trend is significant
+                    trend_significant = p_value < 0.05 and abs(r_value) > 0.3
+                    
+                    # Calculate trend magnitude (percentage change)
+                    if len(y) > 1 and y[0] != 0:
+                        start_score = y[0]
+                        end_score = y[-1]
+                        change_percentage = (end_score - start_score) / start_score * 100
+                    else:
+                        change_percentage = 0
+                    
+                    # Store effectiveness information
+                    verifier_effectiveness[verifier] = {
+                        'trend_significant': trend_significant,
+                        'slope': slope,
+                        'r_value': r_value,
+                        'p_value': p_value,
+                        'change_percentage': change_percentage,
+                        'direction': 'improving' if slope > 0 else 'declining',
+                        'score_values': y.tolist(),
+                        'current_effectiveness': float(y[-1])
+                    }
+        
+        # Analyze whether the most effective verifiers have changed over time
+        if len(verifier_effectiveness) >= 2:
+            # Divide into early and late periods
+            mid_point = len(df) // 2
+            early_df = df.iloc[:mid_point]
+            late_df = df.iloc[mid_point:]
+            
+            # Calculate effectiveness in each period
+            early_effectiveness = early_df.groupby('verifier_id')['verification_score'].mean()
+            late_effectiveness = late_df.groupby('verifier_id')['verification_score'].mean()
+            
+            # Find best verifier in each period
+            if len(early_effectiveness) > 0 and len(late_effectiveness) > 0:
+                early_best = early_effectiveness.idxmax()
+                late_best = late_effectiveness.idxmax()
+                
+                early_score = early_effectiveness.max()
+                late_score = late_effectiveness.max()
+                
+                # Check if the best verifier has changed
+                best_verifier_changed = early_best != late_best
+                
+                effectiveness_evolution = {
+                    'best_verifier_changed': best_verifier_changed,
+                    'early_period': {
+                        'best_verifier': early_best,
+                        'best_score': float(early_score),
+                        'verifiers_ranked': [(v, float(s)) for v, s in 
+                                          sorted(early_effectiveness.items(), key=lambda x: x[1], reverse=True)]
+                    },
+                    'late_period': {
+                        'best_verifier': late_best,
+                        'best_score': float(late_score),
+                        'verifiers_ranked': [(v, float(s)) for v, s in 
+                                          sorted(late_effectiveness.items(), key=lambda x: x[1], reverse=True)]
+                    }
+                }
+        
+        # Create data for visualization
+        visualization_data = {
+            'time_periods': [str(period) for period in verifier_counts_by_period.index],
+            'verifier_counts': verifier_counts_by_period.tolist(),
+            'new_verifiers_by_period': verifiers_by_period,
+            'churn_by_period': verifier_churn
+        }
+        
+        return {
+            'has_evolution': count_trend_significant or bool(effectiveness_evolution.get('best_verifier_changed', False)),
+            'time_period_type': period_name,
+            'verifier_count_trend': {
+                'trend_significant': count_trend_significant,
+                'slope': count_slope,
+                'r_value': count_r,
+                'p_value': count_p,
+                'direction': 'increasing' if count_slope > 0 else 'decreasing',
+                'count_values': y_count.tolist()
+            },
+            'verifier_emergence': {
+                'verifier_appearance_by_period': verifiers_by_period,
+                'total_new_verifiers': sum(len(verifiers) for verifiers in verifiers_by_period.values())
+            },
+            'verifier_churn': verifier_churn,
+            'verifier_effectiveness_trends': verifier_effectiveness,
+            'effectiveness_evolution': effectiveness_evolution,
+            'visualization_data': visualization_data
+        }
+    
+    def _analyze_initial_verification(self, content_groups: List[pd.DataFrame]) -> Dict[str, Any]:
+        """
+        Analyze patterns in initial verification events for content items.
+        
+        Args:
+            content_groups: List of DataFrames, each containing fossils for one content item
+            
+        Returns:
+            Dictionary with initial verification pattern analysis
+        """
+        initial_scores = []
+        initial_methods = []
+        time_to_first_verification = []
+        
+        for content_df in content_groups:
+            # Sort by timestamp
+            content_df = content_df.sort_values('timestamp')
+            
+            # Get the first verification
+            first_verification = content_df.iloc[0]
+            
+            # Record initial score
+            initial_scores.append(first_verification['verification_score'])
+            
+            # Record initial method
+            initial_methods.append(first_verification['verification_method'])
+            
+            # Record time to first verification (if created_at is available)
+            if 'created_at' in content_df.columns:
+                # Calculate time difference between content creation and first verification
+                try:
+                    creation_time = pd.to_datetime(first_verification['created_at'])
+                    verification_time = pd.to_datetime(first_verification['timestamp'])
+                    
+                    time_diff = (verification_time - creation_time).total_seconds() / 3600  # in hours
+                    time_to_first_verification.append(time_diff)
+                except:
+                    # Skip if timestamps can't be parsed
+                    pass
+        
+        # Analyze initial scores
+        mean_initial_score = np.mean(initial_scores)
+        std_initial_score = np.std(initial_scores)
+        
+        # Analyze initial methods
+        method_counts = Counter(initial_methods)
+        most_common_method = method_counts.most_common(1)[0] if method_counts else (None, 0)
+        
+        # Analyze time to first verification
+        if time_to_first_verification:
+            mean_time_to_verification = np.mean(time_to_first_verification)
+            median_time_to_verification = np.median(time_to_first_verification)
+            min_time_to_verification = min(time_to_first_verification)
+            max_time_to_verification = max(time_to_first_verification)
+        else:
+            mean_time_to_verification = None
+            median_time_to_verification = None
+            min_time_to_verification = None
+            max_time_to_verification = None
+        
+        return {
+            'initial_score_statistics': {
+                'mean': mean_initial_score,
+                'std': std_initial_score,
+                'min': min(initial_scores),
+                'max': max(initial_scores),
+                'distribution': np.histogram(initial_scores, bins=10, range=(0, 1))[0].tolist()
+            },
+            'initial_method_distribution': {
+                method: count for method, count in method_counts.items()
+            },
+            'most_common_initial_method': {
+                'method': most_common_method[0],
+                'count': most_common_method[1],
+                'percentage': most_common_method[1] / len(initial_methods) * 100 if initial_methods else 0
+            },
+            'time_to_first_verification': {
+                'mean_hours': mean_time_to_verification,
+                'median_hours': median_time_to_verification,
+                'min_hours': min_time_to_verification,
+                'max_hours': max_time_to_verification
+            } if mean_time_to_verification is not None else None
+        }
+    
+    def _analyze_verification_evolution(self, content_groups: List[pd.DataFrame]) -> Dict[str, Any]:
+        """
+        Analyze how verification scores evolve over the lifecycle of content items.
+        
+        Args:
+            content_groups: List of DataFrames, each containing fossils for one content item
+            
+        Returns:
+            Dictionary with verification evolution pattern analysis
+        """
+        evolution_patterns = []
+        converged_final_scores = []
+        
+        for content_df in content_groups:
+            # Need at least a few verifications to analyze evolution
+            if len(content_df) < 3:
+                continue
+            
+            # Sort by timestamp
+            content_df = content_df.sort_values('timestamp')
+            
+            # Get verification scores
+            scores = content_df['verification_score'].values
+            
+            # Calculate trend
+            x = np.array(range(len(scores)))
+            y = scores
+            
+            slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+            
+            # Check if the trend is significant
+            trend_significant = p_value < 0.05 and abs(r_value) > 0.3
+            
+            # Calculate score changes
+            first_score = scores[0]
+            last_score = scores[-1]
+            score_change = last_score - first_score
+            
+            # Calculate stability of final scores
+            if len(scores) >= 5:
+                final_scores = scores[-5:]
+                final_score_std = np.std(final_scores)
+                converged = final_score_std < 0.1
+                
+                if converged:
+                    converged_final_scores.append(last_score)
+            else:
+                converged = False
+            
+            # Add pattern if significant
+            if trend_significant or abs(score_change) > 0.2:
+                evolution_patterns.append({
+                    'content_fingerprint': content_df['content_fingerprint'].iloc[0],
+                    'initial_score': float(first_score),
+                    'final_score': float(last_score),
+                    'score_change': float(score_change),
+                    'verification_count': len(scores),
+                    'trend': {
+                        'slope': float(slope),
+                        'r_value': float(r_value),
+                        'p_value': float(p_value),
+                        'significant': trend_significant
+                    },
+                    'direction': 'increasing' if slope > 0 else 'decreasing',
+                    'magnitude': 'significant' if abs(score_change) > 0.2 else 'minor',
+                    'pattern': scores.tolist(),
+                    'converged': converged
+                })
+        
+        # Categorize patterns
+        increasing_patterns = [p for p in evolution_patterns if p['direction'] == 'increasing']
+        decreasing_patterns = [p for p in evolution_patterns if p['direction'] == 'decreasing']
+        significant_changes = [p for p in evolution_patterns if p['magnitude'] == 'significant']
+        
+        # Analyze converged scores
+        if converged_final_scores:
+            mean_converged_score = np.mean(converged_final_scores)
+            std_converged_score = np.std(converged_final_scores)
+            
+            # Check if there's a common convergence point
+            common_convergence = std_converged_score < 0.1
+        else:
+            mean_converged_score = None
+            std_converged_score = None
+            common_convergence = False
+        
+        return {
+            'pattern_counts': {
+                'total_patterns_analyzed': len(content_groups),
+                'significant_patterns_found': len(evolution_patterns),
+                'increasing_patterns': len(increasing_patterns),
+                'decreasing_patterns': len(decreasing_patterns),
+                'significant_changes': len(significant_changes)
+            },
+            'common_patterns': {
+                'most_common_direction': 'increasing' if len(increasing_patterns) > len(decreasing_patterns) else 'decreasing',
+                'percentage_increasing': len(increasing_patterns) / len(evolution_patterns) * 100 if evolution_patterns else 0,
+                'average_magnitude': np.mean([abs(p['score_change']) for p in evolution_patterns]) if evolution_patterns else 0
+            },
+            'convergence_analysis': {
+                'converged_count': len(converged_final_scores),
+                'common_convergence_point': common_convergence,
+                'mean_converged_score': mean_converged_score,
+                'std_converged_score': std_converged_score
+            } if converged_final_scores else None,
+            'evolution_patterns': evolution_patterns[:10]  # Limit to 10 to avoid excessive output
+        }
+    
+    def _analyze_verification_convergence(self, content_groups: List[pd.DataFrame]) -> Dict[str, Any]:
+        """
+        Analyze how verification scores converge over multiple verifications.
+        
+        Args:
+            content_groups: List of DataFrames, each containing fossils for one content item
+            
+        Returns:
+            Dictionary with verification convergence pattern analysis
+        """
+        convergence_rates = []
+        convergence_thresholds = []
+        
+        # Define convergence as when the standard deviation of recent scores falls below a threshold
+        convergence_std_threshold = 0.05
+        
+        for content_df in content_groups:
+            # Need at least several verifications to analyze convergence
+            if len(content_df) < 5:
+                continue
+            
+            # Sort by timestamp
+            content_df = content_df.sort_values('timestamp')
+            
+            # Get verification scores
+            scores = content_df['verification_score'].values
+            
+            # Calculate running standard deviation
+            converged = False
+            convergence_index = None
+            
+            for i in range(4, len(scores)):
+                recent_scores = scores[max(0, i-4):i+1]  # Last 5 scores
+                std_dev = np.std(recent_scores)
+                
+                if std_dev < convergence_std_threshold:
+                    converged = True
+                    convergence_index = i
+                    break
+            
+            if converged and convergence_index is not None:
+                # Calculate convergence rate (number of verifications needed)
+                convergence_rate = convergence_index + 1
+                convergence_rates.append(convergence_rate)
+                
+                # Calculate convergence value (average of converged scores)
+                converged_value = np.mean(scores[max(0, convergence_index-4):convergence_index+1])
+                convergence_thresholds.append(converged_value)
+        
+        # Analyze convergence rates
+        if convergence_rates:
+            mean_convergence_rate = np.mean(convergence_rates)
+            median_convergence_rate = np.median(convergence_rates)
+            min_convergence_rate = min(convergence_rates)
+            max_convergence_rate = max(convergence_rates)
+        else:
+            mean_convergence_rate = None
+            median_convergence_rate = None
+            min_convergence_rate = None
+            max_convergence_rate = None
+        
+        # Analyze convergence thresholds
+        if convergence_thresholds:
+            mean_convergence_threshold = np.mean(convergence_thresholds)
+            std_convergence_threshold = np.std(convergence_thresholds)
+            
+            # Check if there's a common convergence threshold
+            common_threshold = std_convergence_threshold < 0.1
+        else:
+            mean_convergence_threshold = None
+            std_convergence_threshold = None
+            common_threshold = False
+        
+        return {
+            'convergence_statistics': {
+                'converged_count': len(convergence_rates),
+                'percentage_converged': len(convergence_rates) / len(content_groups) * 100 if content_groups else 0,
+                'mean_verifications_to_converge': mean_convergence_rate,
+                'median_verifications_to_converge': median_convergence_rate,
+                'min_verifications_to_converge': min_convergence_rate,
+                'max_verifications_to_converge': max_convergence_rate
+            } if convergence_rates else None,
+            'convergence_threshold_analysis': {
+                'mean_convergence_value': mean_convergence_threshold,
+                'std_convergence_value': std_convergence_threshold,
+                'common_convergence_threshold': common_threshold,
+                'threshold_distribution': np.histogram(convergence_thresholds, bins=10, range=(0, 1))[0].tolist() if convergence_thresholds else None
+            } if convergence_thresholds else None
+        }
+    
+    def _analyze_method_transitions(self, content_groups: List[pd.DataFrame]) -> Dict[str, Any]:
+        """
+        Analyze transitions between verification methods over the content lifecycle.
+        
+        Args:
+            content_groups: List of DataFrames, each containing fossils for one content item
+            
+        Returns:
+            Dictionary with method transition pattern analysis
+        """
+        transition_counts = defaultdict(int)
+        method_sequences = []
+        
+        for content_df in content_groups:
+            # Need at least a few verifications to analyze transitions
+            if len(content_df) < 3:
+                continue
+            
+            # Sort by timestamp
+            content_df = content_df.sort_values('timestamp')
+            
+            # Get verification methods
+            methods = content_df['verification_method'].values
+            
+            # Record method sequence
+            method_sequences.append(methods.tolist())
+            
+            # Count transitions
+            for i in range(len(methods) - 1):
+                transition = (methods[i], methods[i+1])
+                transition_counts[transition] += 1
+        
+        # Convert transition counts to a structured format
+        transitions = []
+        for (from_method, to_method), count in sorted(transition_counts.items(), key=lambda x: x[1], reverse=True):
+            transitions.append({
+                'from_method': from_method,
+                'to_method': to_method,
+                'count': count
+            })
+        
+        # Analyze common sequences
+        common_sequences = []
+        if method_sequences:
+            # Analyze method sequences of length 3
+            sequence_counts = defaultdict(int)
+            
+            for sequence in method_sequences:
+                if len(sequence) >= 3:
+                    for i in range(len(sequence) - 2):
+                        seq_3 = tuple(sequence[i:i+3])
+                        sequence_counts[seq_3] += 1
+            
+            # Get most common sequences
+            top_sequences = sorted(sequence_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            
+            for sequence, count in top_sequences:
+                if count >= 2:  # Only include sequences that appear multiple times
+                    common_sequences.append({
+                        'sequence': list(sequence),
+                        'count': count
+                    })
+        
+        # Analyze method diversity
+        method_diversity = []
+        for methods in method_sequences:
+            unique_methods = len(set(methods))
+            method_diversity.append(unique_methods)
+        
+        if method_diversity:
+            mean_diversity = np.mean(method_diversity)
+            max_diversity = max(method_diversity)
+        else:
+            mean_diversity = None
+            max_diversity = None
+        
+        return {
+            'method_transitions': {
+                'transitions': transitions[:10],  # Limit to top 10
+                'total_transitions': sum(transition_counts.values())
+            },
+            'common_sequences': {
+                'sequences': common_sequences,
+                'has_common_patterns': len(common_sequences) > 0
+            },
+            'method_diversity': {
+                'mean_methods_per_content': mean_diversity,
+                'max_methods_per_content': max_diversity,
+                'distribution': Counter(method_diversity)
+            } if method_diversity else None
+        }
+    
+    def _identify_cascades(self, 
+                          df: pd.DataFrame, 
+                          max_time_gap: timedelta, 
+                          min_cascade_size: int) -> List[Dict[str, Any]]:
+        """
+        Identify cascades of verification events.
+        
+        Args:
+            df: DataFrame containing verification data (sorted by timestamp)
+            max_time_gap: Maximum time gap between events in a cascade
+            min_cascade_size: Minimum number of events to constitute a cascade
+            
+        Returns:
+            List of identified cascades
+        """
+        cascades = []
+        current_cascade = []
+        
+        for i in range(len(df)):
+            current_event = df.iloc[i]
+            
+            if not current_cascade:
+                # Start a new cascade
+                current_cascade = [current_event]
+            else:
+                # Check if this event is within the time gap of the last event in the cascade
+                last_event = current_cascade[-1]
+                time_diff = current_event['timestamp'] - last_event['timestamp']
+                
+                if time_diff <= max_time_gap:
+                    # Add to current cascade
+                    current_cascade.append(current_event)
+                else:
+                    # Check if the current cascade is large enough
+                    if len(current_cascade) >= min_cascade_size:
+                        cascades.append(self._create_cascade_dict(current_cascade))
+                    
+                    # Start a new cascade
+                    current_cascade = [current_event]
+        
+        # Check the last cascade
+        if current_cascade and len(current_cascade) >= min_cascade_size:
+            cascades.append(self._create_cascade_dict(current_cascade))
+        
+        return cascades
+    
+    def _create_cascade_dict(self, events: List[pd.Series]) -> Dict[str, Any]:
+        """
+        Create a dictionary representation of a cascade.
+        
+        Args:
+            events: List of verification events in the cascade
+            
+        Returns:
+            Dictionary representing the cascade
+        """
+        # Extract basic cascade information
+        start_time = events[0]['timestamp']
+        end_time = events[-1]['timestamp']
+        duration = end_time - start_time
+        
+        # Extract unique content fingerprints
+        content_fingerprints = set(event['content_fingerprint'] for event in events)
+        
+        # Extract unique verification methods
+        verification_methods = set(event['verification_method'] for event in events)
+        
+        # Extract unique verifiers
+        verifiers = set(event['verifier_id'] for event in events if not pd.isna(event['verifier_id']))
+        
+        # Calculate average time between events
+        if len(events) > 1:
+            time_diffs = [(events[i+1]['timestamp'] - events[i]['timestamp']).total_seconds() / 60 
+                         for i in range(len(events) - 1)]  # in minutes
+            avg_time_between_events = np.mean(time_diffs)
+        else:
+            avg_time_between_events = 0
+        
+        # Create cascade representation
+        cascade = {
+            'cascade_id': f"C-{start_time.strftime('%Y%m%d%H%M%S')}-{len(events)}",
+            'start_time': start_time.isoformat(),
+            'end_time': end_time.isoformat(),
+            'duration_minutes': duration.total_seconds() / 60,
+            'event_count': len(events),
+            'unique_content_count': len(content_fingerprints),
+            'unique_method_count': len(verification_methods),
+            'unique_verifier_count': len(verifiers),
+            'avg_time_between_events_minutes': avg_time_between_events,
+            'events': [event['fossil_id'] for event in events],
+            'content_fingerprints': list(content_fingerprints),
+            'verification_methods': list(verification_methods),
+            'verifiers': list(verifiers) if verifiers else None
+        }
+        
+        return cascade
+    
+    def _analyze_cascade_statistics(self, cascades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Analyze statistical properties of verification cascades.
+        
+        Args:
+            cascades: List of identified cascades
+            
+        Returns:
+            Dictionary with cascade statistics
+        """
+        # Extract cascade properties
+        event_counts = [cascade['event_count'] for cascade in cascades]
+        content_counts = [cascade['unique_content_count'] for cascade in cascades]
+        method_counts = [cascade['unique_method_count'] for cascade in cascades]
+        verifier_counts = [cascade['unique_verifier_count'] for cascade in cascades if cascade['verifiers']]
+        durations = [cascade['duration_minutes'] for cascade in cascades]
+        avg_times_between_events = [cascade['avg_time_between_events_minutes'] for cascade in cascades]
+        
+        # Calculate statistics
+        cascade_stats = {
+            'cascade_count': len(cascades),
+            'event_counts': {
+                'mean': np.mean(event_counts),
+                'median': np.median(event_counts),
+                'min': min(event_counts),
+                'max': max(event_counts)
+            },
+            'content_counts': {
+                'mean': np.mean(content_counts),
+                'median': np.median(content_counts),
+                'min': min(content_counts),
+                'max': max(content_counts)
+            },
+            'method_counts': {
+                'mean': np.mean(method_counts),
+                'median': np.median(method_counts),
+                'min': min(method_counts),
+                'max': max(method_counts)
+            },
+            'duration_minutes': {
+                'mean': np.mean(durations),
+                'median': np.median(durations),
+                'min': min(durations),
+                'max': max(durations)
+            },
+            'avg_time_between_events_minutes': {
+                'mean': np.mean(avg_times_between_events),
+                'median': np.median(avg_times_between_events),
+                'min': min(avg_times_between_events),
+                'max': max(avg_times_between_events)
+            }
+        }
+        
+        # Add verifier statistics if available
+        if verifier_counts:
+            cascade_stats['verifier_counts'] = {
+                'mean': np.mean(verifier_counts),
+                'median': np.median(verifier_counts),
+                'min': min(verifier_counts),
+                'max': max(verifier_counts)
+            }
+        
+        return cascade_stats
+    
+    def _analyze_cascade_triggers(self, cascades: List[Dict[str, Any]], df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Analyze what triggers verification cascades.
+        
+        Args:
+            cascades: List of identified cascades
+            df: DataFrame containing verification data
+            
+        Returns:
+            Dictionary with cascade trigger analysis
+        """
+        # Extract initial events from cascades
+        initial_events = []
+        
+        for cascade in cascades:
+            initial_fossil_id = cascade['events'][0]
+            initial_event = df[df['fossil_id'] == initial_fossil_id].iloc[0]
+            initial_events.append(initial_event)
+        
+        # Analyze initial methods
+        initial_methods = [event['verification_method'] for event in initial_events]
+        method_counts = Counter(initial_methods)
+        most_common_method = method_counts.most_common(1)[0] if method_counts else (None, 0)
+        
+        # Analyze initial scores
+        initial_scores = [event['verification_score'] for event in initial_events]
+        
+        # Check if unusually high or low scores trigger cascades
+        high_scores = [score for score in initial_scores if score > 0.8]
+        low_scores = [score for score in initial_scores if score < 0.2]
+        
+        high_score_percentage = len(high_scores) / len(initial_scores) * 100 if initial_scores else 0
+        low_score_percentage = len(low_scores) / len(initial_scores) * 100 if initial_scores else 0
+        
+        # Analyze initial content types
+        initial_content_types = [event['content_type'] for event in initial_events]
+        content_type_counts = Counter(initial_content_types)
+        most_common_content_type = content_type_counts.most_common(1)[0] if content_type_counts else (None, 0)
+        
+        # Check for temporal patterns in cascade starts
+        if len(initial_events) >= 5:
+            # Extract hour of day
+            hours = [event['timestamp'].hour for event in initial_events]
+            hour_counts = Counter(hours)
+            most_common_hour = hour_counts.most_common(1)[0] if hour_counts else (None, 0)
+            
+            # Extract day of week
+            days = [event['timestamp'].dayofweek for event in initial_events]
+            day_counts = Counter(days)
+            most_common_day = day_counts.most_common(1)[0] if day_counts else (None, 0)
+            
+            # Convert day index to name
+            day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            most_common_day_name = day_names[most_common_day[0]] if most_common_day[0] is not None else None
+            
+            # Check if there's a significant hour or day pattern
+            hour_pattern = most_common_hour[1] > len(initial_events) / 24 * 3  # 3x expected frequency
+            day_pattern = most_common_day[1] > len(initial_events) / 7 * 2  # 2x expected frequency
+            
+            temporal_pattern = {
+                'has_hour_pattern': hour_pattern,
+                'most_common_hour': most_common_hour[0],
+                'hour_percentage': most_common_hour[1] / len(initial_events) * 100 if initial_events else 0,
+                'has_day_pattern': day_pattern,
+                'most_common_day': most_common_day_name,
+                'day_percentage': most_common_day[1] / len(initial_events) * 100 if initial_events else 0
+            }
+        else:
+            temporal_pattern = None
+        
+        return {
+            'method_triggers': {
+                'most_common_method': most_common_method[0],
+                'method_percentage': most_common_method[1] / len(initial_methods) * 100 if initial_methods else 0,
+                'method_distribution': {method: count for method, count in method_counts.items()}
+            },
+            'score_triggers': {
+                'mean_initial_score': np.mean(initial_scores) if initial_scores else None,
+                'high_score_percentage': high_score_percentage,
+                'low_score_percentage': low_score_percentage,
+                'score_distribution': np.histogram(initial_scores, bins=5, range=(0, 1))[0].to
