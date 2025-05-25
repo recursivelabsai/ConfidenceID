@@ -1901,3 +1901,547 @@ class TemporalPatternAnalyzer:
                 'high_score_percentage': high_score_percentage,
                 'low_score_percentage': low_score_percentage,
                 'score_distribution': np.histogram(initial_scores, bins=5, range=(0, 1))[0].to
+                'score_distribution': np.histogram(initial_scores, bins=5, range=(0, 1))[0].tolist() if initial_scores else None
+            },
+            'content_type_triggers': {
+                'most_common_content_type': most_common_content_type[0],
+                'content_type_percentage': most_common_content_type[1] / len(initial_content_types) * 100 if initial_content_types else 0,
+                'content_type_distribution': {ct: count for ct, count in content_type_counts.items()}
+            },
+            'temporal_pattern': temporal_pattern
+        }
+    
+    def _analyze_cascade_propagation(self, cascades: List[Dict[str, Any]], df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Analyze how verification cascades propagate across content and methods.
+        
+        Args:
+            cascades: List of identified cascades
+            df: DataFrame containing verification data
+            
+        Returns:
+            Dictionary with cascade propagation analysis
+        """
+        # Analyze cascade graph structure
+        cascade_graphs = []
+        
+        for cascade in cascades:
+            # Only analyze larger cascades
+            if cascade['event_count'] < 5:
+                continue
+            
+            # Get events in this cascade
+            cascade_events = []
+            for fossil_id in cascade['events']:
+                event = df[df['fossil_id'] == fossil_id]
+                if not event.empty:
+                    cascade_events.append(event.iloc[0])
+            
+            # Create a graph where nodes are content fingerprints
+            G = nx.DiGraph()
+            
+            # Add all content fingerprints as nodes
+            for fingerprint in cascade['content_fingerprints']:
+                G.add_node(fingerprint, type='content')
+            
+            # Add all methods as nodes
+            for method in cascade['verification_methods']:
+                G.add_node(method, type='method')
+            
+            # Add all verifiers as nodes (if available)
+            if cascade['verifiers']:
+                for verifier in cascade['verifiers']:
+                    G.add_node(verifier, type='verifier')
+            
+            # Add edges based on temporal sequence
+            for i in range(len(cascade_events) - 1):
+                current_event = cascade_events[i]
+                next_event = cascade_events[i+1]
+                
+                # Add edge from current content to next content
+                G.add_edge(current_event['content_fingerprint'], next_event['content_fingerprint'], 
+                         type='content_sequence')
+                
+                # Add edge from current method to next method
+                G.add_edge(current_event['verification_method'], next_event['verification_method'], 
+                         type='method_sequence')
+                
+                # Add edge from current verifier to next verifier (if available)
+                if not pd.isna(current_event['verifier_id']) and not pd.isna(next_event['verifier_id']):
+                    G.add_edge(current_event['verifier_id'], next_event['verifier_id'], 
+                             type='verifier_sequence')
+                
+                # Add edge from content to method
+                G.add_edge(current_event['content_fingerprint'], current_event['verification_method'], 
+                         type='content_method')
+                
+                # Add edge from method to content
+                G.add_edge(current_event['verification_method'], next_event['content_fingerprint'], 
+                         type='method_content')
+                
+                # Add edge from verifier to content (if available)
+                if not pd.isna(current_event['verifier_id']):
+                    G.add_edge(current_event['verifier_id'], next_event['content_fingerprint'], 
+                             type='verifier_content')
+            
+            # Calculate graph metrics
+            try:
+                diameter = nx.diameter(G.to_undirected())
+            except (nx.NetworkXError, nx.NetworkXNotImplemented):
+                diameter = None
+            
+            try:
+                avg_path_length = nx.average_shortest_path_length(G.to_undirected())
+            except (nx.NetworkXError, nx.NetworkXNotImplemented):
+                avg_path_length = None
+            
+            # Store graph representation and metrics
+            cascade_graphs.append({
+                'cascade_id': cascade['cascade_id'],
+                'node_count': G.number_of_nodes(),
+                'edge_count': G.number_of_edges(),
+                'diameter': diameter,
+                'avg_path_length': avg_path_length,
+                'content_nodes': len([n for n, attrs in G.nodes(data=True) if attrs.get('type') == 'content']),
+                'method_nodes': len([n for n, attrs in G.nodes(data=True) if attrs.get('type') == 'method']),
+                'verifier_nodes': len([n for n, attrs in G.nodes(data=True) if attrs.get('type') == 'verifier']),
+                'graph_density': nx.density(G)
+            })
+        
+        # Check if cascades tend to spread breadth-first or depth-first
+        if cascade_graphs:
+            # Calculate average diameter to node count ratio
+            diameter_ratios = [g['diameter'] / g['content_nodes'] if g['diameter'] is not None and g['content_nodes'] > 0 else None 
+                             for g in cascade_graphs]
+            diameter_ratios = [r for r in diameter_ratios if r is not None]
+            
+            if diameter_ratios:
+                mean_diameter_ratio = np.mean(diameter_ratios)
+                
+                # Interpret the propagation pattern
+                if mean_diameter_ratio < 0.5:
+                    propagation_pattern = "breadth-first"
+                    pattern_description = "Cascades tend to spread widely across multiple content items simultaneously"
+                elif mean_diameter_ratio > 1.0:
+                    propagation_pattern = "depth-first"
+                    pattern_description = "Cascades tend to follow deep chains of sequential verifications"
+                else:
+                    propagation_pattern = "mixed"
+                    pattern_description = "Cascades show a mix of breadth and depth propagation patterns"
+            else:
+                propagation_pattern = "undetermined"
+                pattern_description = "Insufficient data to determine propagation pattern"
+            
+            # Calculate average graph density
+            mean_density = np.mean([g['graph_density'] for g in cascade_graphs])
+            
+            # Interpret connectivity
+            if mean_density > 0.5:
+                connectivity = "highly-connected"
+                connectivity_description = "Cascade components show strong interconnections"
+            elif mean_density > 0.2:
+                connectivity = "moderately-connected"
+                connectivity_description = "Cascade components show moderate interconnections"
+            else:
+                connectivity = "sparsely-connected"
+                connectivity_description = "Cascade components show minimal interconnections"
+        else:
+            propagation_pattern = "undetermined"
+            pattern_description = "Insufficient data to determine propagation pattern"
+            connectivity = "undetermined"
+            connectivity_description = "Insufficient data to determine connectivity"
+        
+        return {
+            'cascade_graphs': cascade_graphs,
+            'propagation_pattern': {
+                'pattern': propagation_pattern,
+                'description': pattern_description
+            },
+            'connectivity': {
+                'type': connectivity,
+                'description': connectivity_description,
+                'mean_density': mean_density if 'mean_density' in locals() else None
+            }
+        }
+    
+    def _generate_cascade_visualizations(self, cascades: List[Dict[str, Any]], df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Generate visualization data for verification cascades.
+        
+        Args:
+            cascades: List of identified cascades
+            df: DataFrame containing verification data
+            
+        Returns:
+            Dictionary with cascade visualization data
+        """
+        # Select a sample of cascades for visualization (up to 3)
+        sample_size = min(3, len(cascades))
+        
+        # Sort cascades by size (event_count) to visualize the largest ones
+        sorted_cascades = sorted(cascades, key=lambda c: c['event_count'], reverse=True)
+        sample_cascades = sorted_cascades[:sample_size]
+        
+        visualization_data = {}
+        
+        for cascade in sample_cascades:
+            cascade_id = cascade['cascade_id']
+            
+            # Get events in this cascade
+            cascade_events = []
+            for fossil_id in cascade['events']:
+                event = df[df['fossil_id'] == fossil_id]
+                if not event.empty:
+                    cascade_events.append(event.iloc[0].to_dict())
+            
+            # Sort events by timestamp
+            cascade_events.sort(key=lambda e: pd.to_datetime(e['timestamp']))
+            
+            # Create timeline data
+            timeline_data = []
+            for i, event in enumerate(cascade_events):
+                # Convert timestamp to a plottable format
+                timestamp = pd.to_datetime(event['timestamp'])
+                if i == 0:
+                    start_time = timestamp
+                
+                # Calculate time since cascade start
+                time_since_start = (timestamp - start_time).total_seconds() / 60  # in minutes
+                
+                timeline_data.append({
+                    'index': i,
+                    'time_since_start_minutes': time_since_start,
+                    'content_fingerprint': event['content_fingerprint'],
+                    'verification_method': event['verification_method'],
+                    'verification_score': event['verification_score'],
+                    'content_type': event['content_type'],
+                    'verifier_id': event['verifier_id'] if not pd.isna(event['verifier_id']) else None
+                })
+            
+            # Create node-link data for graph visualization
+            nodes = []
+            links = []
+            
+            # Add content fingerprints as nodes
+            for fingerprint in cascade['content_fingerprints']:
+                nodes.append({
+                    'id': fingerprint,
+                    'type': 'content',
+                    'group': 1
+                })
+            
+            # Add methods as nodes
+            for method in cascade['verification_methods']:
+                nodes.append({
+                    'id': method,
+                    'type': 'method',
+                    'group': 2
+                })
+            
+            # Add verifiers as nodes (if available)
+            if cascade['verifiers']:
+                for verifier in cascade['verifiers']:
+                    nodes.append({
+                        'id': verifier,
+                        'type': 'verifier',
+                        'group': 3
+                    })
+            
+            # Add links based on temporal sequence
+            for i in range(len(cascade_events) - 1):
+                current_event = cascade_events[i]
+                next_event = cascade_events[i+1]
+                
+                # Add link from current content to next content
+                links.append({
+                    'source': current_event['content_fingerprint'],
+                    'target': next_event['content_fingerprint'],
+                    'type': 'content_sequence',
+                    'value': 1
+                })
+                
+                # Add link from current method to next method
+                links.append({
+                    'source': current_event['verification_method'],
+                    'target': next_event['verification_method'],
+                    'type': 'method_sequence',
+                    'value': 1
+                })
+            
+            visualization_data[cascade_id] = {
+                'timeline_data': timeline_data,
+                'graph_data': {
+                    'nodes': nodes,
+                    'links': links
+                }
+            }
+        
+        return visualization_data
+    
+    def _analyze_method_lead_lag(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Analyze lead/lag relationships between verification methods.
+        
+        Args:
+            df: DataFrame containing verification data
+            
+        Returns:
+            Dictionary with method lead/lag analysis
+        """
+        # Sort by timestamp
+        df = df.sort_values('timestamp')
+        
+        # Group by content fingerprint to analyze verification sequences for each content item
+        content_groups = df.groupby('content_fingerprint')
+        
+        # Count method transitions
+        method_transitions = defaultdict(int)
+        
+        # For each content item
+        for fingerprint, group in content_groups:
+            # Need at least 2 verifications to analyze transitions
+            if len(group) < 2:
+                continue
+            
+            # Sort by timestamp
+            group = group.sort_values('timestamp')
+            
+            # Get verification methods
+            methods = group['verification_method'].values
+            
+            # Count transitions
+            for i in range(len(methods) - 1):
+                method_transitions[(methods[i], methods[i+1])] += 1
+        
+        # Calculate lead/lag scores for each method
+        methods = df['verification_method'].unique()
+        lead_lag_scores = {}
+        
+        for method in methods:
+            # Count how many times this method leads to other methods
+            lead_count = sum(count for (from_method, to_method), count in method_transitions.items() 
+                           if from_method == method)
+            
+            # Count how many times this method follows other methods
+            lag_count = sum(count for (from_method, to_method), count in method_transitions.items() 
+                          if to_method == method)
+            
+            # Calculate lead/lag ratio
+            if lag_count > 0:
+                lead_lag_ratio = lead_count / lag_count
+            else:
+                lead_lag_ratio = float('inf') if lead_count > 0 else 0
+            
+            # Store lead/lag scores
+            lead_lag_scores[method] = {
+                'lead_count': lead_count,
+                'lag_count': lag_count,
+                'lead_lag_ratio': lead_lag_ratio,
+                'role': 'leader' if lead_lag_ratio > 1.5 else ('follower' if lead_lag_ratio < 0.67 else 'balanced')
+            }
+        
+        # Find the strongest leader and follower methods
+        if lead_lag_scores:
+            leader_method = max(lead_lag_scores.items(), key=lambda x: x[1]['lead_lag_ratio'])[0]
+            follower_method = min(lead_lag_scores.items(), key=lambda x: x[1]['lead_lag_ratio'])[0]
+        else:
+            leader_method = None
+            follower_method = None
+        
+        # Find common method pairs
+        common_pairs = []
+        for (from_method, to_method), count in sorted(method_transitions.items(), key=lambda x: x[1], reverse=True):
+            if count >= 3:  # Only include pairs that occur at least 3 times
+                common_pairs.append({
+                    'from_method': from_method,
+                    'to_method': to_method,
+                    'count': count
+                })
+        
+        return {
+            'method_lead_lag_scores': lead_lag_scores,
+            'leader_method': leader_method,
+            'follower_method': follower_method,
+            'common_method_pairs': common_pairs[:5]  # Limit to top 5
+        }
+    
+    def _analyze_method_succession(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Analyze method succession patterns over time.
+        
+        Args:
+            df: DataFrame containing verification data
+            
+        Returns:
+            Dictionary with method succession analysis
+        """
+        # Sort by timestamp
+        df = df.sort_values('timestamp')
+        
+        # Divide the time range into periods
+        time_range = df['timestamp'].max() - df['timestamp'].min()
+        days = time_range.days
+        
+        # Determine appropriate period length
+        if days < 30:
+            n_periods = min(days, 10)  # Up to 10 periods for short time ranges
+        elif days < 180:
+            n_periods = 12  # About 12 periods for medium time ranges
+        else:
+            n_periods = 24  # About 24 periods for long time ranges
+        
+        # Create time bins
+        df['time_bin'] = pd.cut(df['timestamp'], n_periods)
+        
+        # Count method usage by time bin
+        method_counts = df.groupby(['time_bin', 'verification_method']).size().unstack(fill_value=0)
+        
+        # Calculate dominant method for each time bin
+        dominant_methods = {}
+        method_transitions = []
+        
+        prev_dominant = None
+        for time_bin, counts in method_counts.iterrows():
+            if counts.sum() > 0:
+                dominant = counts.idxmax()
+                dominant_methods[str(time_bin)] = dominant
+                
+                # Track transitions between dominant methods
+                if prev_dominant is not None and prev_dominant != dominant:
+                    method_transitions.append({
+                        'from_method': prev_dominant,
+                        'to_method': dominant,
+                        'time_bin': str(time_bin)
+                    })
+                
+                prev_dominant = dominant
+        
+        # Check for clear succession patterns
+        has_succession_pattern = len(method_transitions) >= 2
+        
+        # Find common transition chains (A -> B -> C)
+        transition_chains = []
+        
+        if len(method_transitions) >= 2:
+            for i in range(len(method_transitions) - 1):
+                if method_transitions[i]['to_method'] == method_transitions[i+1]['from_method']:
+                    chain = {
+                        'methods': [
+                            method_transitions[i]['from_method'],
+                            method_transitions[i]['to_method'],
+                            method_transitions[i+1]['to_method']
+                        ],
+                        'time_bins': [
+                            method_transitions[i]['time_bin'],
+                            method_transitions[i+1]['time_bin']
+                        ]
+                    }
+                    transition_chains.append(chain)
+        
+        return {
+            'dominant_methods_by_period': dominant_methods,
+            'method_transitions': method_transitions,
+            'has_succession_pattern': has_succession_pattern,
+            'transition_chains': transition_chains,
+            'number_of_transitions': len(method_transitions)
+        }
+    
+    def _analyze_method_correlation(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Analyze correlations between verification methods over time.
+        
+        Args:
+            df: DataFrame containing verification data
+            
+        Returns:
+            Dictionary with method correlation analysis
+        """
+        # Divide the time range into periods
+        time_range = df['timestamp'].max() - df['timestamp'].min()
+        days = time_range.days
+        
+        # Determine appropriate period length
+        if days < 30:
+            period = 'D'  # Daily
+            period_name = 'daily'
+        elif days < 180:
+            period = 'W'  # Weekly
+            period_name = 'weekly'
+        else:
+            period = 'M'  # Monthly
+            period_name = 'monthly'
+        
+        # Create time bins
+        df['time_bin'] = pd.to_datetime(df['timestamp']).dt.to_period(period)
+        
+        # Group by time bin and method
+        method_counts = df.groupby(['time_bin', 'verification_method']).size().unstack(fill_value=0)
+        
+        # If not enough data, return empty analysis
+        if len(method_counts) < 5 or method_counts.shape[1] < 2:
+            return {
+                'has_correlations': False,
+                'reason': 'insufficient_data'
+            }
+        
+        # Calculate correlation matrix
+        corr_matrix = method_counts.corr()
+        
+        # Extract significant correlations
+        significant_correlations = []
+        methods = corr_matrix.columns
+        
+        for i, method1 in enumerate(methods):
+            for j, method2 in enumerate(methods):
+                if i < j:  # Only look at unique pairs
+                    corr = corr_matrix.loc[method1, method2]
+                    if abs(corr) > 0.5:  # Only consider reasonably strong correlations
+                        significant_correlations.append({
+                            'method1': method1,
+                            'method2': method2,
+                            'correlation': float(corr),
+                            'relationship': 'positive' if corr > 0 else 'negative',
+                            'strength': 'strong' if abs(corr) > 0.7 else 'moderate'
+                        })
+        
+        # Find method pairs with consistent time offset
+        offset_pairs = []
+        
+        for method1 in methods:
+            for method2 in methods:
+                if method1 != method2:
+                    # Check if method2 consistently follows method1 with a time lag
+                    max_lag = min(10, len(method_counts) // 2)  # Up to 10 periods or half the series length
+                    
+                    # Calculate cross-correlation
+                    cross_corr = pd.Series(method_counts[method1]).corr(pd.Series(method_counts[method2]))
+                    
+                    # Try different lags
+                    best_lag = 0
+                    best_corr = cross_corr
+                    
+                    for lag in range(1, max_lag + 1):
+                        # Shift method1 forward by lag periods
+                        lagged_corr = pd.Series(method_counts[method1]).shift(lag).corr(pd.Series(method_counts[method2]))
+                        
+                        if not np.isnan(lagged_corr) and lagged_corr > best_corr:
+                            best_lag = lag
+                            best_corr = lagged_corr
+                    
+                    # If we found a significant lag correlation
+                    if best_lag > 0 and best_corr > 0.6:
+                        offset_pairs.append({
+                            'lead_method': method1,
+                            'lag_method': method2,
+                            'lag_periods': best_lag,
+                            'correlation': float(best_corr),
+                            'period_type': period_name
+                        })
+        
+        return {
+            'has_correlations': len(significant_correlations) > 0 or len(offset_pairs) > 0,
+            'time_period_type': period_name,
+            'contemporaneous_correlations': significant_correlations,
+            'time_offset_correlations': offset_pairs,
+            'correlation_matrix': corr_matrix.to_dict() if len(methods) <= 10 else None  # Limit size for large matrices
+        }
