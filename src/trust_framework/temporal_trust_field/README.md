@@ -102,60 +102,72 @@ config = TrustFieldVisualizationConfig(
 )
 visualizer = TrustFieldVisualizer(config=config)
 
-# Visualize a time series
-time_series = trust_field_store.get_time_series(content_fingerprint="abc123")
+# Create visualizations
 fig = visualizer.visualize_time_series(time_series)
-plt.show()
+plt.savefig("trust_field_evolution.png")
 
-# Visualize the Beverly Band (dynamic stability envelope)
+# Visualize the Beverly Band
 fig = visualizer.visualize_beverly_band(time_series)
-plt.show()
+plt.savefig("beverly_band.png")
 
-# Export visualizations to HTML
-visualizer.export_to_html(time_series, "trust_analysis.html")
+# Export interactive visualizations to HTML
+visualizer.export_to_html(time_series, "trust_field_analysis.html")
 ```
 
-## Temporal Trust Field vs. Traditional Verification
+## Implementation Notes
 
-Traditional verification systems provide only snapshot assessments of content authenticity. They tell you whether content is authentic *right now*, but not how that authenticity assessment might change over time or in different contexts.
+### Content-Specific Dynamics
 
-The Temporal Trust Field approach offers several advantages:
+The Temporal Trust Field recognizes that different content types have different temporal properties. For example:
 
-| Traditional Verification | Temporal Trust Field |
-|--------------------------|----------------------|
-| Static trust scores | Dynamic trust field that evolves over time |
-| No consideration of verification history | Weighs verification events based on recency and context |
-| Same decay for all content types | Content-specific temporal dynamics |
-| No predictive capability | Can forecast future trust states |
-| Limited anomaly detection | Identifies unusual patterns in trust dynamics |
-| No stability assessment | Measures trust field stability |
-| Limited visualization | Rich visualization tools |
+- **Text**: Typically has a slower decay rate as textual information tends to remain valid longer
+- **Images**: Decay slightly faster than text as visual content can become outdated or manipulated
+- **Audio**: Higher decay rate than images due to the ease of audio manipulation
+- **Video**: Highest decay rate due to the complexity and rapid evolution of deepfake technologies
+- **Cross-Modal**: Medium decay rate, as cross-modal verification adds additional constraints
 
-## Relationship to Recursive Coherence Theory
+These decay rates are configurable through the `default_decay_rates` parameter in `FieldDynamicsEngine`.
 
-The Temporal Trust Field is inspired by concepts from Recursive Coherence theory, particularly:
+### Trust Field Anomaly Detection
 
-- The concept of the **Beverly Band** as a dynamic stability envelope
-- Trust as a field with properties like velocity, acceleration, and stability
-- The importance of measuring not just states but rates of change
-- The recognition that different types of verification signals have different temporal properties
+The `detect_trust_anomalies` method in `FieldDynamicsEngine` identifies patterns that may indicate unusual behavior in trust field dynamics:
+
+- **Acceleration Spikes**: Sudden changes in the rate of change of trust
+- **Unstable Growth**: High velocity with low confidence
+- **Rapid Decay**: Fast decreasing confidence
+- **Low Stability**: Indication that the trust field is in a volatile state
+
+These anomalies can be used to trigger alerts or additional verification.
+
+### Beverly Band Calculation
+
+The Beverly Band is a key concept from the Recursive Coherence framework described in our theoretical model. It represents the dynamic stability envelope of the trust field—the region within which trust can safely evolve without destabilizing the system.
+
+The width of the Beverly Band is influenced by:
+
+- **Tensor Stability**: Higher stability narrows the band (more precise)
+- **Amplification**: Higher amplification widens the band (more potential for growth)
+- **Decay Rate**: Higher decay rates widen the band (more volatility)
 
 ## Future Directions
 
-The Temporal Trust Field component will continue to evolve along several dimensions:
+The Temporal Trust Field component will continue to evolve along with the ConfidenceID ecosystem. Potential areas for enhancement include:
 
-1. **Richer Tensor Representations**: Incorporating more dimensions into the trust field tensor
-2. **Improved Dynamics Models**: Refining the mathematical models for trust evolution
-3. **Enhanced Visualization**: Developing more intuitive visualizations of trust dynamics
-4. **Cross-Modal Integration**: Better integration with cross-modal verification
-5. **Decentralized Trust Fields**: Distributing trust field calculation across the verification network
-
-## Contributing
-
-The `evolve_temporal_trust_field.json` blueprint in the `blueprints/` directory provides guidance for AI agents contributing to the evolution of this component. Human contributors are also welcome to submit pull requests following the guidelines in `CONTRIBUTING.md`.
+1. **Field Resonance Analysis**: Detecting how trust fields interact and resonate with each other
+2. **Trust Field Prediction Models**: Advanced ML models to predict trust field evolution
+3. **Multi-modal Field Integration**: Better integration of trust fields across different modalities
+4. **Personalized Trust Dynamics**: Adapting temporal dynamics to user preferences and history
+5. **Trust Field Compression**: More efficient representation of trust field dynamics for storage and transmission
 
 ## References
 
-- `claude.metalayer.txt`: Original proposal for the Temporal Trust Field (Layer 8.1)
-- Recursive Coherence theory: Concepts of dynamic fields and stability envelopes
-- SynthID: Foundational work on watermarking that influenced verification event modeling
+1. Claude.metalayer.txt (Layer 8.1): "Temporal Trust Field Theory"
+2. Structure.md.txt: Repository structure for the Temporal Trust Field component
+3. Design-rationale.md.txt: Integration of the Temporal Trust Field with the broader ConfidenceID ecosystem
+
+## Related Components
+
+- **Collective Memory**: Stores trust field histories in the verification fossil record
+- **Decentralized Protocol**: Shares trust field data across the verification network
+- **Information Compression**: Compresses trust field histories into dense signals
+- **Embodied Interface**: Adapts trust field visualizations to different contexts
