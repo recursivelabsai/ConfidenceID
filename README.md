@@ -17,7 +17,7 @@
 
 ## Vision & Mission
 
-Inspired by DeepMind's zero-trust breakthroughs, ConfidenceID evolves AI verification watermarking system into a dynamic **trust ecosystem** - where verification signals evolve over time, learn from collective memory, distribute authority through consensus, compress information efficiently, and adapt naturally to different contexts and user needs.
+Inspired by DeepMind's SynthID breakthroughs, ConfidenceID evolves AI verification watermarking system into a dynamic **trust ecosystem** - where verification signals evolve over time, learn from collective memory, distribute authority through consensus, compress information efficiently, and adapt naturally to different contexts and user needs.
 
 Building upon SynthID's foundational work in watermarking, ConfidenceID establishes a comprehensive framework that goes beyond binary authenticity checks, instead offering nuanced, holistic confidence assessments across multiple modalities (text, image, audio, video), while tracking their evolution over time and context.
 
