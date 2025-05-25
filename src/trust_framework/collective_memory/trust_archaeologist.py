@@ -1503,3 +1503,330 @@ class TrustArchaeologist:
                         'best_cluster': best_cluster,
                         'best_score': clusters_with_method[best_cluster],
                         'worst_cluster': worst_cluster,
+                        'worst_score': clusters_with_method[worst_cluster],
+                        'difference': clusters_with_method[best_cluster] - clusters_with_method[worst_cluster]
+                    }
+                })
+        
+        return patterns
+    
+    def _analyze_cross_cluster_verifiers(self, clusters: List[Dict[str, Any]], df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Analyze verifier behavior across clusters.
+        
+        Args:
+            clusters: List of cluster descriptions
+            df: Original DataFrame containing verification data
+            
+        Returns:
+            List of verifier behavior patterns
+        """
+        if len(clusters) <= 1 or df['verifier_id'].nunique() <= 1:
+            return []
+        
+        patterns = []
+        
+        # Analyze verifier behavior per cluster
+        verifier_behavior = {}
+        for cluster in clusters:
+            fingerprints = cluster['content_fingerprints']
+            cluster_fossils = df[df['content_fingerprint'].isin(fingerprints)]
+            
+            if len(cluster_fossils) < 5:
+                continue
+            
+            # Group by verifier
+            verifier_stats = cluster_fossils.groupby('verifier_id')['verification_score'].agg(['mean', 'count']).reset_index()
+            verifier_stats = verifier_stats[verifier_stats['count'] >= 3]  # Only consider verifiers with enough data
+            
+            if len(verifier_stats) <= 1:
+                continue
+            
+            verifier_behavior[cluster['cluster_id']] = {
+                row['verifier_id']: row['mean'] for _, row in verifier_stats.iterrows()
+            }
+        
+        if len(verifier_behavior) <= 1:
+            return []
+        
+        # Find verifiers that behave differently across clusters
+        all_verifiers = set()
+        for cluster_verifiers in verifier_behavior.values():
+            all_verifiers.update(cluster_verifiers.keys())
+        
+        for verifier in all_verifiers:
+            clusters_with_verifier = {c: scores[verifier] for c, scores in verifier_behavior.items() if verifier in scores}
+            
+            if len(clusters_with_verifier) <= 1:
+                continue
+            
+            # Calculate variance in verifier behavior across clusters
+            verifier_scores = list(clusters_with_verifier.values())
+            verifier_variance = np.var(verifier_scores)
+            
+            if verifier_variance > 0.01:
+                best_cluster = max(clusters_with_verifier.items(), key=lambda x: x[1])[0]
+                worst_cluster = min(clusters_with_verifier.items(), key=lambda x: x[1])[0]
+                
+                patterns.append({
+                    'pattern_type': 'cross_cluster_verifier_bias',
+                    'description': f"Verifier '{verifier}' assigns much higher scores to cluster {best_cluster} (score={clusters_with_verifier[best_cluster]:.2f}) than to cluster {worst_cluster} (score={clusters_with_verifier[worst_cluster]:.2f})",
+                    'confidence': min(1.0, verifier_variance * 50),  # Scale confidence based on variance
+                    'data': {
+                        'verifier': verifier,
+                        'best_cluster': best_cluster,
+                        'best_score': clusters_with_verifier[best_cluster],
+                        'worst_cluster': worst_cluster,
+                        'worst_score': clusters_with_verifier[worst_cluster],
+                        'difference': clusters_with_verifier[best_cluster] - clusters_with_verifier[worst_cluster]
+                    }
+                })
+        
+        return patterns
+    
+    def _calculate_pattern_confidence(self, patterns: List[Dict[str, Any]]) -> float:
+        """
+        Calculate an overall confidence score for a set of patterns.
+        
+        Args:
+            patterns: List of identified patterns
+            
+        Returns:
+            Overall confidence score
+        """
+        if not patterns:
+            return 0.0
+        
+        # Weight patterns by their individual confidence
+        weighted_sum = sum(pattern.get('confidence', 0.5) for pattern in patterns)
+        
+        # Factor in the number of patterns (more patterns = higher confidence, up to a point)
+        pattern_factor = min(1.0, len(patterns) / 10)
+        
+        # Calculate overall confidence
+        overall_confidence = min(1.0, weighted_sum / len(patterns) * (0.5 + 0.5 * pattern_factor))
+        
+        return overall_confidence
+    
+    def _empty_archaeology_report(self) -> Dict[str, Any]:
+        """
+        Generate an empty archaeology report for when no fossils are found.
+        
+        Returns:
+            Empty report dictionary
+        """
+        return {
+            'report_id': f"AR-{datetime.now().strftime('%Y%m%d%H%M%S')}-empty",
+            'timestamp': datetime.now().isoformat(),
+            'criteria': {},
+            'fossils_analyzed': 0,
+            'temporal_patterns': [],
+            'anomalies': [],
+            'consistencies': [],
+            'confidence_evolution': {'evolution_type': 'empty', 'data': {}}
+        }
+    
+    def _report_has_significant_patterns(self, report: Dict[str, Any]) -> bool:
+        """
+        Determine if a report contains significant patterns worth storing.
+        
+        Args:
+            report: Archaeology report
+            
+        Returns:
+            True if the report contains significant patterns, False otherwise
+        """
+        # Check if there are any patterns or anomalies
+        has_patterns = len(report.get('temporal_patterns', [])) > 0
+        has_anomalies = len(report.get('anomalies', [])) > 0
+        has_consistencies = len(report.get('consistencies', [])) > 0
+        
+        # Check for significant confidence evolution
+        confidence_evolution = report.get('confidence_evolution', {})
+        significant_evolution = confidence_evolution.get('evolution_type', '') not in ['empty', 'insufficient_data', 'mixed_confidence']
+        
+        return has_patterns or has_anomalies or has_consistencies or significant_evolution
+    
+    def _store_report_as_pattern(self, report: Dict[str, Any]) -> str:
+        """
+        Store an archaeology report as a pattern in the database.
+        
+        Args:
+            report: Archaeology report
+            
+        Returns:
+            The pattern ID
+        """
+        # Extract related fossils
+        related_fossils = []
+        for fossil in report.get('fossils', []):
+            if 'fossil_id' in fossil:
+                related_fossils.append(fossil['fossil_id'])
+        
+        # Generate a description based on the report
+        description_parts = []
+        
+        # Add temporal patterns to description
+        for pattern in report.get('temporal_patterns', []):
+            if 'description' in pattern:
+                description_parts.append(pattern['description'])
+        
+        # Add top anomalies to description (limit to 3)
+        anomalies = sorted(report.get('anomalies', []), key=lambda x: x.get('confidence', 0), reverse=True)
+        for anomaly in anomalies[:3]:
+            if 'description' in anomaly:
+                description_parts.append(anomaly['description'])
+        
+        # Add top consistencies to description (limit to 3)
+        consistencies = sorted(report.get('consistencies', []), key=lambda x: x.get('confidence', 0), reverse=True)
+        for consistency in consistencies[:3]:
+            if 'description' in consistency:
+                description_parts.append(consistency['description'])
+        
+        # Add confidence evolution to description
+        confidence_evolution = report.get('confidence_evolution', {})
+        if confidence_evolution.get('evolution_type') not in ['empty', 'insufficient_data', 'mixed_confidence']:
+            description_parts.append(f"Confidence evolution: {confidence_evolution.get('evolution_type')}")
+        
+        # Generate the final description
+        description = ". ".join(description_parts)
+        if not description:
+            description = "Archaeological analysis of verification fossils"
+        
+        # Calculate confidence based on the number and confidence of patterns
+        pattern_confidence = self._calculate_pattern_confidence(
+            report.get('temporal_patterns', []) + 
+            report.get('anomalies', []) + 
+            report.get('consistencies', [])
+        )
+        
+        # Store the pattern
+        pattern_id = self.fossil_db.store_pattern(
+            pattern_type='archaeological_analysis',
+            pattern_description=description,
+            confidence_score=pattern_confidence,
+            related_fossils=related_fossils,
+            metadata={
+                'report_id': report.get('report_id'),
+                'temporal_patterns_count': len(report.get('temporal_patterns', [])),
+                'anomalies_count': len(report.get('anomalies', [])),
+                'consistencies_count': len(report.get('consistencies', [])),
+                'confidence_evolution_type': report.get('confidence_evolution', {}).get('evolution_type', 'unknown')
+            }
+        )
+        
+        logger.info(f"Stored archaeology report as pattern with ID: {pattern_id}")
+        return pattern_id
+    
+    def _generate_visualizations(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Generate visualizations for an archaeology report.
+        
+        Args:
+            df: DataFrame containing verification data
+            
+        Returns:
+            Dictionary containing visualization data
+        """
+        visualizations = {}
+        
+        # Only proceed if we have enough data
+        if len(df) < 5:
+            return visualizations
+        
+        # Ensure datetime format for timestamp
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        # Sort by timestamp
+        df = df.sort_values('timestamp')
+        
+        # Generate verification score timeline
+        try:
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # Plot verification scores
+            ax.plot(df['timestamp'], df['verification_score'], marker='o', linestyle='-', label='Verification Score')
+            
+            # Calculate and plot running average
+            df['running_avg'] = df['verification_score'].rolling(window=5, min_periods=1).mean()
+            ax.plot(df['timestamp'], df['running_avg'], linestyle='--', color='red', label='Running Average (5)')
+            
+            # Add labels and title
+            ax.set_xlabel('Time')
+            ax.set_ylabel('Verification Score')
+            ax.set_title('Verification Score Timeline')
+            
+            # Add grid and legend
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            
+            # Format dates
+            fig.autofmt_xdate()
+            
+            # Save to buffer
+            from io import BytesIO
+            import base64
+            
+            buffer = BytesIO()
+            fig.savefig(buffer, format='png')
+            buffer.seek(0)
+            
+            # Convert to base64 for embedding
+            img_str = base64.b64encode(buffer.read()).decode('utf-8')
+            visualizations['score_timeline'] = f"data:image/png;base64,{img_str}"
+            
+            # Close figure to free memory
+            plt.close(fig)
+        
+        except Exception as e:
+            logger.warning(f"Error generating verification score timeline: {e}")
+        
+        # Generate method comparison visualization
+        try:
+            if df['verification_method'].nunique() > 1:
+                # Create figure
+                fig, ax = plt.subplots(figsize=(10, 6))
+                
+                # Group by method and calculate statistics
+                method_stats = df.groupby('verification_method')['verification_score'].agg(['mean', 'std', 'count']).reset_index()
+                method_stats = method_stats[method_stats['count'] >= 3]  # Only consider methods with enough data
+                
+                if len(method_stats) > 0:
+                    # Sort by mean score
+                    method_stats = method_stats.sort_values('mean', ascending=False)
+                    
+                    # Create bar chart
+                    bars = ax.bar(method_stats['verification_method'], method_stats['mean'], yerr=method_stats['std'], 
+                                 capsize=5, alpha=0.7)
+                    
+                    # Add labels and title
+                    ax.set_xlabel('Verification Method')
+                    ax.set_ylabel('Average Score')
+                    ax.set_title('Verification Methods Comparison')
+                    
+                    # Add count labels
+                    for i, bar in enumerate(bars):
+                        count = method_stats.iloc[i]['count']
+                        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02, 
+                               f"n={count}", ha='center', va='bottom')
+                    
+                    # Add grid
+                    ax.grid(True, alpha=0.3, axis='y')
+                    
+                    # Save to buffer
+                    buffer = BytesIO()
+                    fig.savefig(buffer, format='png')
+                    buffer.seek(0)
+                    
+                    # Convert to base64 for embedding
+                    img_str = base64.b64encode(buffer.read()).decode('utf-8')
+                    visualizations['method_comparison'] = f"data:image/png;base64,{img_str}"
+                    
+                    # Close figure to free memory
+                    plt.close(fig)
+        
+        except Exception as e:
+            logger.warning(f"Error generating method comparison visualization: {e}")
+        
+        return visualizations
