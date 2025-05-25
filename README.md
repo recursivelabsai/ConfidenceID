@@ -4,7 +4,7 @@
   
 ![ConfidenceID Logo](docs/assets/logo.png)
 
-**A Living, Evolving Framework for Holistic AI Output Verification**
+**An Evolving Framework for Holistic AI Output Verification**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/Version-3.0.0--alpha-orange.svg)](https://github.com/YourOrg/ConfidenceID/releases)
